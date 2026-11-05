@@ -1,0 +1,85 @@
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    container_name: gateflow-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_REQUESTS: 100
+      RATE_LIMIT_WINDOW_SECONDS: 60
+      REQUEST_TIMEOUT: 10
+
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-gateflow_user}:${POSTGRES_PASSWORD:-gateflow_dev_password}@postgres:5432/${POSTGRES_DB:-gateflow}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set in .env}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  user-service:
+    build:
+      context: .
+      dockerfile: backend-services/user-service/Dockerfile
+    container_name: gateflow-user-service
+    expose:
+      - "8002"
+    restart: unless-stopped
+
+  product-service:
+    build:
+      context: .
+      dockerfile: backend-services/product-service/Dockerfile
+    container_name: gateflow-product-service
+    expose:
+      - "8003"
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: gateflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gateflow_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gateflow_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-gateflow}
+
+    ports:
+      - "5432:5432"
+    volumes:
+      - gateflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gateflow_user} -d ${POSTGRES_DB:-gateflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: gateflow-redis
+    command: redis-server --appendonly yes
+    expose:
+      - "6379"
+    volumes:
+      - gateflow_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  gateflow_postgres_data:
+  gateflow_redis_data:
